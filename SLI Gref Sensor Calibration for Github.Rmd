@@ -1,0 +1,308 @@
+---
+title: "SLI Gref Sensor Calibration"
+output: html_document
+date: "2024-02-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(tidyverse)
+library(car)
+library(dplyr)
+library(ggplot2)
+library(ggridges)
+library(datasets)
+library(magrittr)
+library(svglite)
+
+```
+
+Functions to load:
+```{r}
+#Function for converting volts to Celsius:
+#TMP36 Sensors
+VtoC36 <- function(volts) {
+  celsius <- (volts - 0.5) / 0.01
+  return(celsius)}
+
+#Cleaning data frame -- removing unnecessary characters, making columns numeric, and removing all NA's
+cleanSLI <- function(d, a, b) {
+  d <- as.data.frame(d)
+  d[[a]] <- gsub("=", "", d[[a]])
+  d[[a]] <- gsub(":", "", d[[a]])
+  d[[b]] <- gsub(":", "", d[[b]])
+  d[[a]] <- as.numeric(d[[a]])
+  d[[b]] <- as.numeric(d[[b]])
+  d <- na.omit(d)
+  return(d)
+}
+
+#Adding an Elapsed Time column to data frame:
+#TCHC 2 point calibration data 
+add.time1.6 <- function(d) {
+  increment <- 1.6
+  num_rows <- nrow(d)
+  Time <- seq(from = 0, by = increment, length.out = num_rows)
+  d$Time <- Time
+  return(d)
+}
+
+#Creating Linear Models and Saving Slope and Intercepts From Data
+lm.slope.int <- function(d, x, y) {
+  formula_str <- paste(y, "~", x)
+  lm_form <- as.formula(formula_str)
+  lm_d <- lm(lm_form, data = d)
+  lmcoef <- coef(lm_d)
+  slope_d <- lmcoef[x]
+  intercept_d <- lmcoef["(Intercept)"]
+  return(list(slope = slope_d, intercept = intercept_d))
+}
+
+```
+
+Read in data sets:
+```{r}
+
+SLIL1 <- read.csv("Low Temp Calibration SLI.csv")
+SLIH1 <- read.csv("High Temp Calibration SLI.csv")
+
+```
+
+Subset data for only the columns you need:
+```{r}
+
+SLIL1 <- SLIL1[, c("X.1", "X.3")]
+SLIH1 <- SLIH1[, c("X.6", "X.8")] 
+
+```
+
+Cleaning:
+```{r}
+
+SLIL2 <- cleanSLI(SLIL1, "X.1", "X.3")
+SLIH2 <- cleanSLI(SLIH1, "X.6", "X.8")
+
+```
+
+
+Changing names of headings:
+```{r}
+
+colnames(SLIL2)[1] <- "NIST"
+colnames(SLIL2)[2] <- "Gref"
+
+
+colnames(SLIH2)[1] <- "NIST"
+colnames(SLIH2)[2] <- "Gref"
+
+```
+
+Creating new columns converting Volts to Celsius:
+```{r}
+
+SLIL2$GrefC <- VtoC36(SLIL2$Gref)
+
+SLIH2$GrefC <- VtoC36(SLIH2$Gref)
+
+```
+
+Create a new data frame for sorting by NIST:
+```{r}
+
+#Low Temp
+#subset the data so you only have NIST and Gref values 
+SLIL3 <- SLIL2[, c("NIST", "GrefC")]
+
+#order the data based on ascending NIST values
+SLIL3_Sorted <- SLIL3[order(SLIL3$NIST), ]
+
+#High Temp
+#subset the data so you only have NIST and Gref values 
+SLIH3 <- SLIH2[, c("NIST", "GrefC")]
+
+#order the data based on ascending NIST values
+SLIH3_Sorted <- SLIH3[order(SLIH3$NIST), ]
+
+```
+
+Add Elapsed Time:
+```{r}
+
+SLIL3_Sorted <- add.time1.6(SLIL3_Sorted)
+SLIH3_Sorted <- add.time1.6(SLIH3_Sorted)
+```
+
+Graphing Sorted Data:
+```{r}
+Sort_NIST_lo36 <- ggplot(SLIL3_Sorted, aes(x = Time))+
+  geom_point(aes(y = GrefC, color = "Gref"))+
+  geom_point(aes(y = NIST, color = "NIST"))+
+  geom_smooth(aes(y = GrefC), method = "lm", se = FALSE, color = "black")+
+  geom_smooth(aes(y = NIST), method = "lm", se = FALSE, color = "black")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Time (sec)", 
+       y="Temperature (°C)",
+       color = "Reference")+
+  scale_color_manual(name = "Sensor",
+                     breaks = c('NIST', 'Gref'),
+                     values = c('Gref' = 'red', 'NIST' = 'gold4'))+ 
+  ggtitle("SLI TMP 36 Low Temp Calibration Sorted by NIST")+
+  theme_classic()
+
+Sort_NIST_hi36 <- ggplot(SLIH3_Sorted, aes(x = Time))+
+  geom_point(aes(y = GrefC, color = "Gref"))+
+  geom_point(aes(y = NIST, color = "NIST"))+
+  geom_smooth(aes(y = GrefC), method = "lm", se = FALSE, color = "black")+
+  geom_smooth(aes(y = NIST), method = "lm", se = FALSE, color = "black")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Time (sec)", 
+       y="Temperature (°C)",
+       color = "Reference")+
+  scale_color_manual(name = "Sensor",
+                     breaks = c('NIST', 'Gref'),
+                     values = c('Gref' = 'red', 'NIST' = 'gold4'))+ 
+  ggtitle("SLI TMP 36 High Temp Calibration Sorted by NIST")+
+  theme_classic()
+
+Sort_NIST_lo36
+Sort_NIST_hi36
+
+#ggsave("Sort_NIST_lo36.png", plot = Sort_NIST_lo36, width = 10, height = 6, dpi = 300)
+#ggsave("Sort_NIST_hi36.png", plot = Sort_NIST_hi36, width = 10, height = 6, dpi = 300)
+```
+
+
+Slope and Intercept of the lines created in graphs:
+```{r}
+
+#making the models for the lm lines on above graph
+results <- lm.slope.int(SLIL3_Sorted, "Time", "NIST")
+slope_LNIST <- results$slope
+intercept_LNIST <- results$intercept
+
+results <- lm.slope.int(SLIH3_Sorted, "Time", "NIST")
+slope_HNIST <- results$slope
+intercept_HNIST <- results$intercept
+
+results <- lm.slope.int(SLIL3_Sorted, "Time", "GrefC")
+slope_LGref <- results$slope
+intercept_LGref <- results$intercept
+
+results <- lm.slope.int(SLIH3_Sorted, "Time", "GrefC")
+slope_HGref <- results$slope
+intercept_HGref <- results$intercept
+
+```
+
+Plug in 22 and 35 into y=mx+b from above:
+```{r}
+#LOW
+NIST22 <- (slope_LNIST*22) + intercept_LNIST
+
+GREF22 <- (slope_LGref*22) + intercept_LGref
+
+#HIGH
+NIST35 <- (slope_HNIST*35) + intercept_HNIST
+
+GREF35 <- (slope_HGref*35) + intercept_HGref
+
+#Ranges
+NISTR <- NIST35 - NIST22
+  
+GREFR <- GREF35 - GREF22
+
+```
+
+
+Making new dataframe w these 4 points:
+```{r}
+T1T2 <- tibble(
+  Temp = c(22, 35),
+  CGref = c(GREF22, GREF35),
+  CNIST = c(NIST22, NIST35)
+)
+```
+
+Graph CNIST and CGREF:
+```{r}
+CNIST_CGref <- ggplot(T1T2, aes(x = Temp))+
+  geom_point(aes(y = CGref, color = "Gref"))+
+  geom_point(aes(y = CNIST, color = "NIST"))+
+  geom_smooth(aes(y = CGref), method = "lm", se = FALSE, color = "red")+
+  geom_smooth(aes(y = CNIST), method = "lm", se = FALSE, color = "gold4")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Temperature (°C)", 
+       y="Temperature (°C)",
+       color = "Sensor")+
+  scale_color_manual(name = "Sensor",
+                     breaks = c('NIST', 'Gref'),
+                     values = c('Gref' = 'red', 'NIST' = 'gold4'))+ 
+  ggtitle("SLI TMP 36 Corrected NIST and Gref Values")+
+  theme_classic()
+
+CNIST_CGref
+
+#ggsave("CNIST_CGref.png", plot = CNIST_CGref, width = 10, height = 6, dpi = 300)
+
+```
+Slope and Intercept of the lines created in graphs:
+```{r}
+
+#making the models for the lm lines on above graphs
+results <- lm.slope.int(T1T2, "Temp", "CNIST")
+slope_CNIST <- results$slope
+intercept_CNIST <- results$intercept
+
+results <- lm.slope.int(T1T2, "Temp", "CGref")
+slope_CGref <- results$slope
+intercept_CGref <- results$intercept
+
+```
+
+
+Finding Ultimate Gref formula:
+```{r}
+
+UCGREFL <- (((13.0138 - GREF22)*(NISTR))/GREFR) + NIST22
+
+UCGREFH <- (((21.1121 - GREF22)*(NISTR))/GREFR) + NIST22
+
+```
+
+New table adding UCGREF:
+```{r}
+
+NIST.UCGREF <- tibble(
+  Temp = c(22, 35),
+  CNIST = c(NIST22, NIST35),
+  UCGREF = c(UCGREFL, UCGREFH)
+)
+
+```
+
+Graphing Corrected NIST and UCGREF:
+```{r}
+
+CNIST_UCGref <- ggplot(NIST.UCGREF, aes(x = Temp))+
+  geom_point(aes(y = UCGREF, color = "Ref Post"))+
+  geom_point(aes(y = CNIST, color = "NIST"))+
+  geom_smooth(aes(y = UCGREF), method = "lm", se = FALSE, color = "black")+
+  geom_smooth(aes(y = CNIST), method = "lm", se = FALSE, color = "gold4")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Temperature (°C)", 
+       y="Temperature (°C)",
+       color = "Sensor")+
+  scale_color_manual(name = "Sensor",
+                     breaks = c('NIST', 'Ref Post'),
+                     values = c('Ref Post' = 'black', 'NIST' = 'gold4'))+ 
+  ggtitle("SLI TMP 36 Final Corrected NIST and Gref")+
+  theme_classic()
+
+CNIST_UCGref
+
+#ggsave("CNIST_UCGref.png", plot = CNIST_UCGref, width = 10, height = 6, dpi = 300)
+```

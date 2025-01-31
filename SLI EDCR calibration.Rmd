@@ -1,0 +1,534 @@
+---
+title: "EDCR calibration SLI"
+output: html_document
+date: "2024-03-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(tidyverse)
+library(car)
+library(dplyr)
+library(ggplot2)
+library(ggridges)
+library(datasets)
+library(magrittr)
+library(svglite)
+
+```
+
+Functions to load:
+```{r}
+#Function for converting volts to Celsius:
+#TMP36 Sensors
+VtoC36 <- function(volts) {
+  celsius <- (volts - 0.5) / 0.01
+  return(celsius)}
+
+#Cleaning data frame -- removing unnecessary characters, making columns numeric, and removing all NA's
+clean <- function(d, a, b) {
+  d <- as.data.frame(d)
+  d[[a]] <- gsub(":", "", d[[a]])
+  d[[b]] <- gsub(":", "", d[[b]])
+  d[[a]] <- as.numeric(d[[a]])
+  d[[b]] <- as.numeric(d[[b]])
+  d <- na.omit(d)
+  return(d)
+}
+
+
+#ECDR Calorimeter data
+add.time31.6 <- function(d) {
+  increment <- 31.6
+  num_rows <- nrow(d)
+  Time <- seq(from = 0, by = increment, length.out = num_rows)
+  d$Time <- Time
+  return(d)
+}
+
+#Creating Linear Models and Saving Slope and Intercepts From Data
+lm.slope.int <- function(d, x, y) {
+  formula_str <- paste(y, "~", x)
+  lm_form <- as.formula(formula_str)
+  lm_d <- lm(lm_form, data = d)
+  lmcoef <- coef(lm_d)
+  slope_d <- lmcoef[x]
+  intercept_d <- lmcoef["(Intercept)"]
+  return(list(slope = slope_d, intercept = intercept_d))
+}
+
+#Creating a function to remove 0 values from data set
+remove.zeros36 <- function(d, ...) {
+  d %>%
+    filter(across(..., ~ . > 0.5 & . < 0.9))
+}
+
+
+```
+
+Read in data sets:
+```{r}
+
+SLIsencallo <- read.csv("SLIcal_Lo_022724.csv")
+SLIsencalhi <- read.csv("SLIcal_Hi_030224.csv")
+
+```
+
+Subset for columns needed:
+```{r}
+SLIsencallo <- SLIsencallo[, c("ch0", "ch1", "ch2", "ch5", "ch6", "Gref")]
+SLIsencalhi <- SLIsencalhi[, c("Ch0", "Ch1", "Ch2", "Ch5", "Ch6", "GrefAvg")]
+```
+
+Removing zeros:
+```{r}
+SLIsencallo <- subset(SLIsencallo, ch0 > 0.5)
+SLIsencallo <- subset(SLIsencallo, ch1 > 0.5)
+SLIsencallo <- subset(SLIsencallo, ch2 > 0.5)
+SLIsencallo <- subset(SLIsencallo, ch5 > 0.5)
+SLIsencallo <- subset(SLIsencallo, ch6 > 0.5)
+
+SLIsencalhi <- subset(SLIsencalhi, Ch0 < 0.9)
+SLIsencalhi <- subset(SLIsencalhi, Ch1 < 0.9)
+SLIsencalhi <- subset(SLIsencalhi, Ch2 < 0.9)
+SLIsencalhi <- subset(SLIsencalhi, Ch5 < 0.9)
+SLIsencalhi <- subset(SLIsencalhi, Ch6 < 0.9)
+```
+
+
+Add Elapsed Time to new sorted data frame:
+```{r}
+
+SLIsencallo <- add.time31.6(SLIsencallo)
+SLIsencalhi <- add.time31.6(SLIsencalhi)
+
+```
+
+Celsius:
+```{r}
+SLIsencallo$ch0C <- VtoC36(SLIsencallo$ch0)
+SLIsencallo$ch1C <- VtoC36(SLIsencallo$ch1)
+SLIsencallo$ch2C <- VtoC36(SLIsencallo$ch2)
+SLIsencallo$ch5C <- VtoC36(SLIsencallo$ch5)
+SLIsencallo$ch6C <- VtoC36(SLIsencallo$ch6)
+
+SLIsencalhi$Ch0C <- VtoC36(SLIsencalhi$Ch0)
+SLIsencalhi$Ch1C <- VtoC36(SLIsencalhi$Ch1)
+SLIsencalhi$Ch2C <- VtoC36(SLIsencalhi$Ch2)
+SLIsencalhi$Ch5C <- VtoC36(SLIsencalhi$Ch5)
+SLIsencalhi$Ch6C <- VtoC36(SLIsencalhi$Ch6)
+
+SLIsencallo$GrefC <- VtoC36(SLIsencallo$Gref)
+SLIsencalhi$GrefC <- VtoC36(SLIsencalhi$GrefAvg)
+```
+
+Column for UCGref:
+```{r}
+
+SLIsencallo$UCGref <- ((((SLIsencallo$GrefC - GREF22)*(NISTR))/GREFR) + NIST22)
+SLIsencalhi$UCGref <- ((((SLIsencalhi$GrefC - GREF22)*(NISTR))/GREFR) + NIST22)
+
+```
+
+Graphing unsorted data:
+```{r}
+#ggplot(SLIsencallo, aes(x = Time))+
+#  geom_point(aes(y = ch0C, color = "ch0"))+
+#  geom_point(aes(y = ch1C, color = "ch1"))+
+#  geom_point(aes(y = ch2C, color = "ch2"))+
+#  geom_point(aes(y = ch5C, color = "ch5"))+
+#  geom_point(aes(y = ch6C, color = "ch6"))+
+##  geom_point(aes(y = GrefC, color = "GrefC"))+
+#  geom_point(aes(y = UCGref, color = "UCGref"))+
+#  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+#  labs(x="Time (sec)", 
+#       y="Temperature (degrees C)", 
+#       color = "Reference")+
+#  scale_color_manual(name = "Reference", 
+#                     breaks = c('ch0', 'ch1', 'ch2', 'ch5', 'ch6', 'GrefC', 'UCGref'), 
+#                     values = c('ch0' = 'blue', 'ch1' = 'green', 'ch2' = 'gold', 'ch5' = 'red', 'ch6' = 'black', 'GrefC' = #'purple', 'UCGref' = 'gold4'))+
+#  ggtitle("Low Temperature EDCR SLI")+
+#  theme_classic()
+#
+#ggplot(SLIsencalhi, aes(x = Time))+
+#  geom_point(aes(y = Ch0C, color = "Ch0"))+
+#  geom_point(aes(y = Ch1C, color = "Ch1"))+
+#  geom_point(aes(y = Ch2C, color = "Ch2"))+
+#  geom_point(aes(y = Ch5C, color = "Ch5"))+
+#  geom_point(aes(y = Ch6C, color = "Ch6"))+
+##  geom_point(aes(y = GrefC, color = "GrefC"))+
+#  geom_point(aes(y = UCGref, color = "UCGref"))+
+#  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+#  labs(x="Time (sec)", 
+#       y="Temperature (degrees C)", 
+#       color = "Reference")+
+#  scale_color_manual(name = "Reference", 
+#                     breaks = c('Ch0', 'Ch1', 'Ch2', 'Ch5', 'Ch6', 'GrefC', 'UCGref'), 
+#                     values = c('Ch0' = 'blue', 'Ch1' = 'green', 'Ch2' = 'gold', 'Ch5' = 'red', 'Ch6' = 'black', 'GrefC' = #'purple', 'UCGref' = 'gold4'))+
+#  ggtitle("High Temp EDCR SLI")+
+#  theme_classic()
+```
+
+Sort data by UCGREF:
+```{r}
+
+#order the data based on ascending NIST values
+SLIsencallo_Sorted <- SLIsencallo[order(SLIsencallo$UCGref), ]
+
+#order the data based on ascending NIST values
+SLIsencalhi_Sorted <- SLIsencalhi[order(SLIsencalhi$UCGref), ]
+
+```
+
+Add Elapsed Time to new data frame:
+```{r}
+SLIsencallo_Sorted <- add.time31.6(SLIsencallo_Sorted)
+SLIsencalhi_Sorted <- add.time31.6(SLIsencalhi_Sorted)
+```
+
+Graphing Sorted data:
+```{r}
+SLIch_Sortedlo <- ggplot(SLIsencallo_Sorted, aes(x = Time))+
+  geom_point(aes(y = ch0C, color = "D4"))+
+  geom_point(aes(y = ch1C, color = "D6"))+
+  geom_point(aes(y = ch2C, color = "D2"))+
+  geom_point(aes(y = ch5C, color = "D7"))+
+  geom_point(aes(y = ch6C, color = "D8"))+
+#  geom_point(aes(y = GrefC, color = "GrefC"))+
+ # geom_point(aes(y = UCGref, color = "UCGref"))+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Time (s)", 
+       y="Temperature (°C)", 
+       color = "Sensor")+
+  scale_color_manual(name = "Sensor", 
+                     breaks = c('D2', 'D4', 'D6', 'D7', 'D8', 'UCGref'), 
+                     values = c('D2' = 'maroon2', 'D4' = 'royalblue3', 'D6' = 'seagreen2', 'D7' = 'sienna2', 'D8' = 'slategrey', 'UCGref' = 'black'))+
+  ggtitle("SLI Low Temp Sorted by Corrected Gref")+
+  theme_classic()
+
+SLIch_Sortedhi <- ggplot(SLIsencalhi_Sorted, aes(x = Time))+
+  geom_point(aes(y = Ch0C, color = "D4"))+
+  geom_point(aes(y = Ch1C, color = "D6"))+
+  geom_point(aes(y = Ch2C, color = "D2"))+
+  geom_point(aes(y = Ch5C, color = "D7"))+
+  geom_point(aes(y = Ch6C, color = "D8"))+
+#  geom_point(aes(y = GrefC, color = "GrefC"))+
+  #geom_point(aes(y = UCGref, color = "UCGref"))+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Time (s)", 
+       y="Temperature (°C)", 
+       color = "Sensor")+
+  scale_color_manual(name = "Sensor", 
+                     breaks = c('D2', 'D4', 'D6', 'D7', 'D8', 'UCGref'), 
+                     values = c('D2' = 'maroon2', 'D4' = 'royalblue3', 'D6' = 'seagreen2', 'D7' = 'sienna2', 'D8' = 'slategrey', 'UCGref' = 'black'))+
+  ggtitle("SLI High Temp Sorted by Corrected Gref")+
+  theme_classic()
+
+SLIch_Sortedlo
+SLIch_Sortedhi
+
+#ggsave("SLIch_Sortedlo.png", plot = SLIch_Sortedlo, width = 10, height = 6, dpi = 300)
+#ggsave("SLIch_Sortedhi.png", plot = SLIch_Sortedhi, width = 10, height = 6, dpi = 300)
+```
+
+Slope and Intercept of the lines created in graphs:
+```{r}
+
+#making the models for the lm lines on above graph
+results <- lm.slope.int(SLIsencallo_Sorted, "Time", "ch0C")
+slope_ch0 <- results$slope
+intercept_ch0 <- results$intercept
+
+results <- lm.slope.int(SLIsencallo_Sorted, "Time", "ch1C")
+slope_ch1 <- results$slope
+intercept_ch1 <- results$intercept
+
+results <- lm.slope.int(SLIsencallo_Sorted, "Time", "ch2C")
+slope_ch2 <- results$slope
+intercept_ch2 <- results$intercept
+
+results <- lm.slope.int(SLIsencallo_Sorted, "Time", "ch5C")
+slope_ch5 <- results$slope
+intercept_ch5 <- results$intercept
+
+results <- lm.slope.int(SLIsencallo_Sorted, "Time", "ch6C")
+slope_ch6 <- results$slope
+intercept_ch6 <- results$intercept
+
+
+
+results <- lm.slope.int(SLIsencalhi_Sorted, "Time", "Ch0C")
+slope_Ch0 <- results$slope
+intercept_Ch0 <- results$intercept
+
+results <- lm.slope.int(SLIsencalhi_Sorted, "Time", "Ch1C")
+slope_Ch1 <- results$slope
+intercept_Ch1 <- results$intercept
+
+results <- lm.slope.int(SLIsencalhi_Sorted, "Time", "Ch2C")
+slope_Ch2 <- results$slope
+intercept_Ch2 <- results$intercept
+
+results <- lm.slope.int(SLIsencalhi_Sorted, "Time", "Ch5C")
+slope_Ch5 <- results$slope
+intercept_Ch5 <- results$intercept
+
+results <- lm.slope.int(SLIsencalhi_Sorted, "Time", "Ch6C")
+slope_Ch6 <- results$slope
+intercept_Ch6 <- results$intercept
+
+```
+
+
+Lines and y=mx+b
+```{r}
+ch022 <- (slope_ch0*20) + intercept_ch0
+
+ch122 <- (slope_ch1*20) + intercept_ch1
+
+ch222 <- (slope_ch2*20) + intercept_ch2
+
+ch522 <- (slope_ch5*20) + intercept_ch5
+
+ch622 <- (slope_ch6*20) + intercept_ch6
+
+
+Ch035 <- (slope_Ch0*35) + intercept_Ch0
+
+Ch135 <- (slope_Ch1*35) + intercept_Ch1
+
+Ch235 <- (slope_Ch2*35) + intercept_Ch2
+
+Ch535 <- (slope_Ch5*35) + intercept_Ch5
+
+Ch635 <- (slope_Ch6*35) + intercept_Ch6
+
+
+
+#Ranges
+
+ch0R <- Ch035 - ch022
+ch1R <- Ch135 - ch122
+ch2R <- Ch235 - ch222
+ch5R <- Ch535 - ch522
+ch6R <- Ch635 - ch622
+
+
+```
+
+New data frame of channels and UCGREF: 
+```{r}
+
+channels <- tibble(
+  Temp = c(20, 35),
+  UCGREF = c(UCGREFL, UCGREFH), 
+  Ch0 = c(ch022, Ch035),
+  Ch1 = c(ch122, Ch135), 
+  Ch2 = c(ch222, Ch235), 
+  Ch5 = c(ch522, Ch535), 
+  Ch6 = c(ch622, Ch635), 
+)
+```
+
+Graphing corrected channel data:
+```{r}
+SLIcorrectedsen <- ggplot(channels, aes(x = Temp))+
+  geom_point(aes(y = Ch0, color = "D4"))+
+  geom_point(aes(y = Ch1, color = "D6"))+
+  geom_point(aes(y = Ch2, color = "D2"))+
+  geom_point(aes(y = Ch5, color = "D7"))+
+  geom_point(aes(y = Ch6, color = "D8"))+
+  geom_smooth(aes(y = Ch0), method = "lm", se = FALSE, color = "royalblue3")+
+  geom_smooth(aes(y = Ch1), method = "lm", se = FALSE, color = "seagreen2")+
+  geom_smooth(aes(y = Ch2), method = "lm", se = FALSE, color = "maroon2")+
+  geom_smooth(aes(y = Ch5), method = "lm", se = FALSE, color = "sienna2")+
+  geom_smooth(aes(y = Ch6), method = "lm", se = FALSE, color = "slategrey")+
+  geom_smooth(aes(y = UCGREF), method = "lm", se = FALSE, color = "black")+
+#  geom_point(aes(y = GrefC, color = "GrefC"))+
+  geom_point(aes(y = UCGREF, color = "Reference"))+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Temperature (°C)", 
+       y="Temperature (°C)", 
+       color = "Sensor")+
+  scale_color_manual(name = "Sensor", 
+                     breaks = c('Reference', 'D2', 'D4', 'D6', 'D7', 'D8'), 
+                     values = c('D2' = 'maroon2', 'D4' = 'royalblue3', 'D6' = 'seagreen2', 'D7' = 'sienna2', 'D8' = 'slategrey', 'Reference' = 'black'))+
+  ggtitle("SLI TMP 36 Corrected Sensors")+
+  theme_classic()
+
+SLIcorrectedsen
+
+#ggsave("SLIcorrectedsen.png", plot = SLIcorrectedsen, width = 10, height = 6, dpi = 300)
+
+```
+
+
+Ultimate Channel Formualas THIS IS THE IMPORTANT ONES FOR THE EXPERIMENTAL DATA:
+~Raw data taken from SLsIsencallo and hi, first row of each respective one~
+```{r}
+Correctedch0 <- (((15.0020 - min(SLIsencallo$ch0C))*((max(SLIsencalhi$UCGref)- min(SLIsencallo$UCGref))))/(max(SLIsencalhi$Ch0C) - min(SLIsencallo$ch0C))) + min(SLIsencallo$UCGref)
+
+CorrectedCh0 <- (((22.3566 - min(SLIsencallo$ch0C))*((max(SLIsencalhi$UCGref)- min(SLIsencallo$UCGref))))/(max(SLIsencalhi$Ch0C) - min(SLIsencallo$ch0C))) + min(SLIsencallo$UCGref)
+
+Correctedch1 <- (((14.7437 - min(SLIsencallo$ch1C))*((max(SLIsencalhi$UCGref)- min(SLIsencallo$UCGref))))/(max(SLIsencalhi$Ch1C) - min(SLIsencallo$ch1C))) + min(SLIsencallo$UCGref)
+
+CorrectedCh1 <- (((22.2223 - min(SLIsencallo$ch1C))*((max(SLIsencalhi$UCGref)- min(SLIsencallo$UCGref))))/(max(SLIsencalhi$Ch1C) - min(SLIsencallo$ch1C))) + min(SLIsencallo$UCGref)
+
+Correctedch2 <- (((14.8363 - min(SLIsencallo$ch2C))*((max(SLIsencalhi$UCGref)- min(SLIsencallo$UCGref))))/(max(SLIsencalhi$Ch2C) - min(SLIsencallo$ch2C))) + min(SLIsencallo$UCGref)
+
+CorrectedCh2 <- (((22.2086 - min(SLIsencallo$ch2C))*((max(SLIsencalhi$UCGref)- min(SLIsencallo$UCGref))))/(max(SLIsencalhi$Ch2C) - min(SLIsencallo$ch2C))) + min(SLIsencallo$UCGref)
+
+Correctedch5 <- (((15.2776 - min(SLIsencallo$ch5C))*((max(SLIsencalhi$UCGref)- min(SLIsencallo$UCGref))))/(max(SLIsencalhi$Ch5C) - min(SLIsencallo$ch5C))) + min(SLIsencallo$UCGref)
+
+CorrectedCh5 <- (((22.5029 - min(SLIsencallo$ch5C))*((max(SLIsencalhi$UCGref)- min(SLIsencallo$UCGref))))/(max(SLIsencalhi$Ch5C) - min(SLIsencallo$ch5C))) + min(SLIsencallo$UCGref)
+
+Correctedch6 <- (((15.0158 - min(SLIsencallo$ch6C))*((max(SLIsencalhi$UCGref)- min(SLIsencallo$UCGref))))/(max(SLIsencalhi$Ch6C) - min(SLIsencallo$ch6C))) + min(SLIsencallo$UCGref)
+
+CorrectedCh6 <- (((21.9900 - min(SLIsencallo$ch6C))*((max(SLIsencalhi$UCGref)- min(SLIsencallo$UCGref))))/(max(SLIsencalhi$Ch6C) - min(SLIsencallo$ch6C))) + min(SLIsencallo$UCGref)
+
+UCGREFlo <- (((13.17211 - GREF22)*(NISTR))/GREFR) + NIST22
+UCGREFhi <- (((21.28410 - GREF22)*(NISTR))/GREFR) + NIST22
+```
+
+Values into a table:
+```{r}
+
+corrected <- tibble(
+  Temp = c(20, 35),
+  UCGREF = c(UCGREFlo, UCGREFhi), 
+  Ch0 = c(Correctedch0, CorrectedCh0),
+  Ch1 = c(Correctedch1, CorrectedCh1), 
+  Ch2 = c(Correctedch2, CorrectedCh2), 
+  Ch5 = c(Correctedch5, CorrectedCh5), 
+  Ch6 = c(Correctedch6, CorrectedCh6), 
+)
+```
+
+Plotting Corrected Values:
+```{r}
+SLIfinalcorrectedsen <- ggplot(corrected, aes(x = Temp))+
+  geom_point(aes(y = Ch0, color = "D4"))+
+  geom_point(aes(y = Ch1, color = "D6"))+
+  geom_point(aes(y = Ch2, color = "D2"))+
+  geom_point(aes(y = Ch5, color = "D7"))+
+  geom_point(aes(y = Ch6, color = "D8"))+
+  geom_point(aes(y = UCGREF, color = "Reference"))+
+  geom_smooth(aes(y = Ch0), method = "lm", se = FALSE, color = "royalblue3")+
+  geom_smooth(aes(y = Ch1), method = "lm", se = FALSE, color = "seagreen2")+
+  geom_smooth(aes(y = Ch2), method = "lm", se = FALSE, color = "maroon2")+
+  geom_smooth(aes(y = Ch5), method = "lm", se = FALSE, color = "sienna2")+
+  geom_smooth(aes(y = Ch6), method = "lm", se = FALSE, color = "slategrey")+
+  geom_smooth(aes(y = UCGREF), method = "lm", se = FALSE, color = "black")+
+#  geom_point(aes(y = GrefC, color = "GrefC"))+
+  geom_point(aes(y = UCGREF, color = "UCGref"))+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Temperature (°C)", 
+       y="Temperature (°C)", 
+       color = "Sensor")+
+  scale_color_manual(name = "Sensor", 
+                     breaks = c('Reference', 'D2', 'D4', 'D6', 'D7', 'D8'), 
+                     values = c('D2' = 'maroon2', 'D4' = 'royalblue3', 'D6' = 'seagreen2', 'D7' = 'sienna2', 'D8' = 'slategrey', 'Reference' = 'black'))+
+  ggtitle("SLI TMP 36 Final Corrected Sensors")+
+  theme_classic()
+
+SLIfinalcorrectedsen
+
+#ggsave("SLIfinalcorrectedsen.png", plot = SLIfinalcorrectedsen, width = 10, height = 6, dpi = 300)
+```
+
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#Make line from ex: x = 500 to 1000 for each channel. Tell range of y for your choosing. 
+
+Standard Deviation from UCGREF and percent error:
+```{r}
+SD_lo <- sd(SLIsencallo$UCGref)
+SD_hi <- sd(SLIsencalhi$UCGref)
+
+
+SLIsencallo$PercentErrorch0 <- abs((SLIsencallo$ch0Corrected - SLIsencallo$UCGref) / SLIsencallo$ch0Corrected) * 100
+SLIsencallo$PercentErrorch1 <- abs((SLIsencallo$ch1Corrected - SLIsencallo$UCGref) / SLIsencallo$ch1Corrected) * 100
+SLIsencallo$PercentErrorch2 <- abs((SLIsencallo$ch2Corrected - SLIsencallo$UCGref) / SLIsencallo$ch2Corrected) * 100
+SLIsencallo$PercentErrorch5 <- abs((SLIsencallo$ch5Corrected - SLIsencallo$UCGref) / SLIsencallo$ch5Corrected) * 100
+SLIsencallo$PercentErrorch6 <- abs((SLIsencallo$ch6Corrected - SLIsencallo$UCGref) / SLIsencallo$ch6Corrected) * 100
+
+SLIsencalhi$PercentErrorCh0 <- abs((SLIsencalhi$Ch0Corrected - SLIsencalhi$UCGref) / SLIsencalhi$Ch0Corrected) * 100
+SLIsencalhi$PercentErrorCh1 <- abs((SLIsencalhi$Ch1Corrected - SLIsencalhi$UCGref) / SLIsencalhi$Ch1Corrected) * 100
+SLIsencalhi$PercentErrorCh2 <- abs((SLIsencalhi$Ch2Corrected - SLIsencalhi$UCGref) / SLIsencalhi$Ch2Corrected) * 100
+SLIsencalhi$PercentErrorCh5 <- abs((SLIsencalhi$Ch5Corrected - SLIsencalhi$UCGref) / SLIsencalhi$Ch5Corrected) * 100
+SLIsencalhi$PercentErrorCh6 <- abs((SLIsencalhi$Ch6Corrected - SLIsencalhi$UCGref) / SLIsencalhi$Ch6Corrected) * 100
+
+ch0_mean <- mean(SLIsencallo$PercentErrorch0) 
+ch1_mean <- mean(SLIsencallo$PercentErrorch1)
+ch2_mean <- mean(SLIsencallo$PercentErrorch2)
+ch5_mean <- mean(SLIsencallo$PercentErrorch5)
+ch6_mean <- mean(SLIsencallo$PercentErrorch6)
+
+Ch0_mean <- mean(SLIsencalhi$PercentErrorCh0)
+Ch1_mean <- mean(SLIsencalhi$PercentErrorCh1)
+Ch2_mean <- mean(SLIsencalhi$PercentErrorCh2)
+Ch5_mean <- mean(SLIsencalhi$PercentErrorCh5)
+Ch6_mean <- mean(SLIsencalhi$PercentErrorCh6)
+
+print(ch0_mean)
+print(ch1_mean)
+print(ch2_mean)
+print(ch5_mean)
+print(ch6_mean)
+
+print(Ch0_mean)
+print(Ch1_mean)
+print(Ch2_mean)
+print(Ch5_mean)
+print(Ch6_mean)
+
+print(SD_lo)
+print(SD_hi)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SLIsencallo$PercentErrorch0R <- abs((SLIsencallo$ch0C - SLIsencallo$UCGref) / SLIsencallo$ch0C) * 100
+SLIsencallo$PercentErrorch1R <- abs((SLIsencallo$ch1C - SLIsencallo$UCGref) / SLIsencallo$ch1C) * 100
+SLIsencallo$PercentErrorch2R <- abs((SLIsencallo$ch2C - SLIsencallo$UCGref) / SLIsencallo$ch2C) * 100
+SLIsencallo$PercentErrorch5R <- abs((SLIsencallo$ch5C - SLIsencallo$UCGref) / SLIsencallo$ch5C) * 100
+SLIsencallo$PercentErrorch6R <- abs((SLIsencallo$ch6C - SLIsencallo$UCGref) / SLIsencallo$ch6C) * 100
+
+SLIsencalhi$PercentErrorCh0R <- abs((SLIsencalhi$Ch0C - SLIsencalhi$UCGref) / SLIsencalhi$Ch0C) * 100
+SLIsencalhi$PercentErrorCh1R <- abs((SLIsencalhi$Ch1C - SLIsencalhi$UCGref) / SLIsencalhi$Ch1C) * 100
+SLIsencalhi$PercentErrorCh2R <- abs((SLIsencalhi$Ch2C - SLIsencalhi$UCGref) / SLIsencalhi$Ch2C) * 100
+SLIsencalhi$PercentErrorCh5R <- abs((SLIsencalhi$Ch5C - SLIsencalhi$UCGref) / SLIsencalhi$Ch5C) * 100
+SLIsencalhi$PercentErrorCh6R <- abs((SLIsencalhi$Ch6C - SLIsencalhi$UCGref) / SLIsencalhi$Ch6C) * 100
+
+ch0_meanR <- mean(SLIsencallo$PercentErrorch0R) 
+ch1_meanR <- mean(SLIsencallo$PercentErrorch1R)
+ch2_meanR <- mean(SLIsencallo$PercentErrorch2R)
+ch5_meanR <- mean(SLIsencallo$PercentErrorch5R)
+ch6_meanR <- mean(SLIsencallo$PercentErrorch6R)
+
+Ch0_meanR <- mean(SLIsencalhi$PercentErrorCh0R)
+Ch1_meanR <- mean(SLIsencalhi$PercentErrorCh1R)
+Ch2_meanR <- mean(SLIsencalhi$PercentErrorCh2R)
+Ch5_meanR <- mean(SLIsencalhi$PercentErrorCh5R)
+Ch6_meanR <- mean(SLIsencalhi$PercentErrorCh6R)
+
+print(ch0_meanR)
+print(ch1_meanR)
+print(ch2_meanR)
+print(ch5_meanR)
+print(ch6_meanR)
+
+print(Ch0_meanR)
+print(Ch1_meanR)
+print(Ch2_meanR)
+print(Ch5_meanR)
+print(Ch6_meanR)
+```
+
+
+
+
+
