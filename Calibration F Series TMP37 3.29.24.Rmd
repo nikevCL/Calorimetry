@@ -1,0 +1,777 @@
+
+ ---
+title: "F Series TMP 37 Calibration"
+output: html_document
+date: "2024-03-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(tidyverse)
+library(car)
+library(dplyr)
+library(ggplot2)
+library(ggridges)
+library(datasets)
+library(magrittr)
+library(svglite)
+
+```
+
+Functions to load:
+```{r}
+#Function for converting volts to Celsius:
+#TMP36 Sensors
+VtoC36 <- function(volts) {
+  celsius <- (volts - 0.5) / 0.01
+  return(celsius)}
+
+#TMP37 Sensors
+VtoC37 <- function(volts) {
+  celsius <- (volts / 0.02)
+  return(celsius)}
+
+#Cleaning data frame -- removing unnecessary characters, making columns numeric, and removing all NA's
+clean <- function(d, a, b) {
+  d <- as.data.frame(d)
+  d[[a]] <- gsub(":", "", d[[a]])
+  d[[b]] <- gsub(":", "", d[[b]])
+  d[[a]] <- as.numeric(d[[a]])
+  d[[b]] <- as.numeric(d[[b]])
+  d <- na.omit(d)
+  return(d)
+}
+
+#Adding an Elapsed Time column to data frame:
+#TCHC 2 point calibration data 
+add.time1.6 <- function(d) {
+  increment <- 1.6
+  num_rows <- nrow(d)
+  Time <- seq(from = 0, by = increment, length.out = num_rows)
+  d$Time <- Time
+  return(d)
+}
+
+#ECDR Calorimeter data
+add.time31.6 <- function(d) {
+  increment <- 31.6
+  num_rows <- nrow(d)
+  Time <- seq(from = 0, by = increment, length.out = num_rows)
+  d$Time <- Time
+  return(d)
+}
+
+#Creating Linear Models and Saving Slope and Intercepts From Data
+lm.slope.int <- function(d, x, y) {
+  formula_str <- paste(y, "~", x)
+  lm_form <- as.formula(formula_str)
+  lm_d <- lm(lm_form, data = d)
+  lmcoef <- coef(lm_d)
+  slope_d <- lmcoef[x]
+  intercept_d <- lmcoef["(Intercept)"]
+  return(list(slope = slope_d, intercept = intercept_d))
+}
+
+#Creating a function to remove 0 values from data set
+remove.zeros36 <- function(d, ...) {
+  d %>%
+    filter(across(..., ~ . > 0.5 & . < 0.9))
+}
+
+
+```
+
+Read in data sets:
+```{r}
+
+F_Series <- read.csv("SenCal_seriesF_031124.csv")
+
+```
+
+Subset data for only the columns you need:
+```{r}
+
+F_Series <- F_Series[, c("CALIBRATE", "X.3", "X.5")]
+
+```
+
+Cleaning:
+```{r}
+
+F_Series <- clean(F_Series, "X.3", "X.5")
+F_Series <- subset(F_Series, F_Series$X.5 > 0.3) #removes 0 values from data set
+
+```
+
+Changing names of headings:
+```{r}
+
+colnames(F_Series)[2] <- "NIST"
+colnames(F_Series)[3] <- "GrefV"
+
+```
+
+Creating new columns converting Volts to Celsius and removing 0 value:
+```{r}
+
+F_Series$GrefC <- VtoC37(F_Series$GrefV)
+
+```
+
+Subseting Hi and Low:
+```{r}
+
+Lo <- subset(F_Series, CALIBRATE == "Lo")
+Hi <- subset(F_Series, CALIBRATE == "Hi")
+
+```
+
+Create a new data frame for sorting by NIST:
+```{r}
+
+#order the data based on ascending NIST values
+Lo_Sorted <- Lo[order(Lo$NIST), ]
+
+#order the data based on ascending NIST values
+Hi_Sorted <- Hi[order(Hi$NIST), ]
+
+```
+
+Add Elapsed Time to new sorted data frames:
+```{r}
+
+Lo_Sorted <- add.time1.6(Lo_Sorted)
+Hi_Sorted <- add.time1.6(Hi_Sorted)
+
+```
+
+Graphing Sorted Data:
+```{r}
+F_TMP37_lo <- ggplot(Lo_Sorted, aes(x = Time))+
+  geom_point(aes(y = GrefC, color = "Gref"))+
+  geom_point(aes(y = NIST, color = "NIST"))+
+  geom_smooth(aes(y = GrefC), method = "lm", se = FALSE, color = "black")+
+  geom_smooth(aes(y = NIST), method = "lm", se = FALSE, color = "black")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Time (s)", 
+       y="Temperature (°C)",
+       color = "Sensor")+
+  annotate("text", x = 1000, y = 19.3, label = "y = 0.0003383x + 19.33")+
+  annotate("text", x = 1000, y = 19, label = expression("R"^2*" = 0.9358"))+
+  annotate("text", x = 1000, y = 15.8, label = "y = 0.0002707x + 15.83")+
+  annotate("text", x = 1000, y = 15.5, label = expression("R"^2*" = 0.9297"))+
+  scale_color_manual(name = "Sensor",
+                     breaks = c('NIST', 'Gref'),
+                     values = c('NIST' = 'gold4', 'Gref' = 'red'))+ 
+  ggtitle("Linear Model (Low Temperature)")+
+  theme_classic()
+
+F_TMP37_lo
+
+#ggsave("F Series TMP 37 linear model.png", F_TMP37_lo, width = 15, height = 10, units = "cm")
+
+ggplot(Hi_Sorted, aes(x = Time))+
+  geom_point(aes(y = GrefC, color = "Gref"))+
+  geom_point(aes(y = NIST, color = "NIST"))+
+  geom_smooth(aes(y = GrefC), method = "lm", se = FALSE, color = "black")+
+  geom_smooth(aes(y = NIST), method = "lm", se = FALSE, color = "black")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Time (s)", 
+       y="Temperature (°C)",
+       color = "Sensor")+
+  annotate("text", x = 1600, y = 32.4, label = "y = 0.0.001135x + 31.52")+
+  annotate("text", x = 1600, y = 26.5, label = "y = 0.0008599x + 26.22")+
+  scale_color_manual(name = "Sensor",
+                     breaks = c('NIST', 'Gref'),
+                     values = c('NIST' = 'gold4', 'Gref' = 'red'))+ 
+  ggtitle("NIST and Gref Sensor (High Temperature)")+
+  theme_classic()
+```
+
+Slope and Intercept of the lines created in graphs:
+```{r}
+
+#making the models for the lm lines on above graph
+results <- lm.slope.int(Lo_Sorted, "Time", "NIST")
+slope_LNIST <- results$slope
+intercept_LNIST <- results$intercept
+
+results <- lm.slope.int(Hi_Sorted, "Time", "NIST")
+slope_HNIST <- results$slope
+intercept_HNIST <- results$intercept
+
+results <- lm.slope.int(Lo_Sorted, "Time", "GrefC")
+slope_LGref <- results$slope
+intercept_LGref <- results$intercept
+
+results <- lm.slope.int(Hi_Sorted, "Time", "GrefC")
+slope_HGref <- results$slope
+intercept_HGref <- results$intercept
+
+```
+
+Plug in 22 and 35 into y=mx+b from above:
+```{r}
+#LOW
+NIST22 <- (slope_LNIST*22) + intercept_LNIST
+
+GREF22 <- (slope_LGref*22) + intercept_LGref
+
+#HIGH
+NIST35 <- (slope_HNIST*35) + intercept_HNIST
+
+GREF35 <- (slope_HGref*35) + intercept_HGref
+
+#Ranges
+NISTR <- NIST35 - NIST22
+  
+GREFR <- GREF35 - GREF22
+
+```
+
+Making new dataframe w these 4 points:
+```{r}
+T1T2 <- tibble(
+  Temp = c(22, 35),
+  CGref = c(GREF22, GREF35),
+  CNIST = c(NIST22, NIST35)
+)
+```
+
+Graph CNIST and CGREF:
+```{r}
+Cal_b4corrected <- ggplot(T1T2, aes(x = Temp))+
+  geom_point(aes(y = CGref, color = "Gref"))+
+  geom_point(aes(y = CNIST, color = "NIST"))+
+  geom_smooth(aes(y = CGref), method = "lm", se = FALSE, color = "red")+
+  geom_smooth(aes(y = CNIST), method = "lm", se = FALSE, color = "gold4")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Temperature (°C)", 
+       y="Temperature (°C)",
+       color = "Reference")+
+  scale_color_manual(name = "Reference",
+                     breaks = c('NIST', 'Gref'),
+                     values = c('NIST' = 'gold4', 'Gref' = 'red'))+ 
+  ggtitle("NIST and Gref Before Correction")+
+  theme_classic()
+
+Cal_b4corrected
+
+#ggsave("Cal_b4corrected.png", plot = Cal_b4corrected, width = 10, height = 6, dpi = 300)
+```
+
+Slope and Intercept of the lines created in graphs:
+```{r}
+
+#making the models for the lm lines on above graphs
+results <- lm.slope.int(T1T2, "Temp", "CNIST")
+slope_CNIST <- results$slope
+intercept_CNIST <- results$intercept
+
+results <- lm.slope.int(T1T2, "Temp", "CGref")
+slope_CGref <- results$slope
+intercept_CGref <- results$intercept
+
+```
+
+Finding Ultimate Gref formula:
+```{r}
+
+UCGREFL <- (((15.71795 - GREF22)*(NISTR))/GREFR) + NIST22 #used real lowest value from raw data 
+
+UCGREFH <- (((25.62540 - GREF22)*(NISTR))/GREFR) + NIST22 #used real lowest value from raw data 
+
+#UCREF <- (((a - 13.112233)*(9.866786))/(8.345732) + (23.0521835)
+```
+
+New data frame of CNIST and UCGREF: 
+```{r}
+
+NIST.UCGREF <- tibble(
+  Temp = c(22, 35),
+  CNIST = c(NIST22, NIST35),
+  UCGREF = c(UCGREFL, UCGREFH), 
+  CGref = c(GREF22, GREF35)
+)
+
+```
+
+Plotting:
+```{r}
+
+F_TMP37_Cal <- ggplot(NIST.UCGREF, aes(x = Temp))+
+  geom_point(aes(y = UCGREF, color = "Ref Post"))+
+  geom_point(aes(y = CNIST, color = "NIST"))+
+  geom_point(aes(y = CGref, color = "Ref Pre"))+
+  geom_smooth(aes(y = UCGREF), method = "lm", se = FALSE, color = "black")+
+  geom_smooth(aes(y = CGref), method = "lm", se = FALSE, color = "red")+
+  geom_smooth(aes(y = CNIST), method = "lm", se = FALSE, color = "gold4")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Temperature (°C)", 
+       y="Temperature (°C)",
+       color = "Reference")+
+  scale_color_manual(name = "Sensor",
+                     breaks = c('NIST', 'Ref Pre', 'Ref Post'),
+                     values = c('Ref Post' = 'black', 'NIST' = 'gold4', 'Ref Pre' = 'red'))+ 
+  ggtitle("Calibration of Ref to NIST Sensor")+
+  theme_classic()
+
+F_TMP37_Cal
+
+#ggsave("F Series TMP 37 Calibration.png", F_TMP37_Cal, width = 15, height = 10, units = "cm")
+```
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+EDCR DATA:
+
+
+Read in data sets:
+```{r}
+
+Exp64lo <- read.csv("CB_ECDR64_TMP37lo_3.27.24SHORT.csv")
+Exp64hi <- read.csv("CB_ECDR64_TMP37hi_3.27.24.csv")
+
+```
+
+Subset for columns needed:
+```{r}
+Exp64lo <- Exp64lo[, c("ch0", "ch1", "ch2", "ch3","Gref", "ch5", "ch6", "ch7")]
+Exp64hi <- Exp64hi[, c("Ch0", "Ch1", "Ch2", "Ch3", "Gref", "Ch5", "Ch6", "Ch7")]
+```
+
+Add Elapsed Time to new data frame:
+```{r}
+Exp64lo <- add.time31.6(Exp64lo)
+Exp64hi <- add.time31.6(Exp64hi)
+```
+
+Celsius:
+```{r}
+Exp64lo$ch0 <- VtoC37(Exp64lo$ch0)
+Exp64lo$ch1 <- VtoC37(Exp64lo$ch1)
+Exp64lo$ch2 <- VtoC37(Exp64lo$ch2)
+Exp64lo$ch3 <- VtoC37(Exp64lo$ch3)
+Exp64lo$Gref <- VtoC37(Exp64lo$Gref)
+Exp64lo$ch5 <- VtoC37(Exp64lo$ch5)
+Exp64lo$ch6 <- VtoC37(Exp64lo$ch6)
+Exp64lo$ch7 <- VtoC37(Exp64lo$ch7)
+
+Exp64hi$Ch0 <- VtoC37(Exp64hi$Ch0)
+Exp64hi$Ch1 <- VtoC37(Exp64hi$Ch1)
+Exp64hi$Ch2 <- VtoC37(Exp64hi$Ch2)
+Exp64hi$Ch3 <- VtoC37(Exp64hi$Ch3)
+Exp64hi$Gref <- VtoC37(Exp64hi$Gref)
+Exp64hi$Ch5 <- VtoC37(Exp64hi$Ch5)
+Exp64hi$Ch6 <- VtoC37(Exp64hi$Ch6)
+Exp64hi$Ch7 <- VtoC37(Exp64hi$Ch7)
+```
+
+Column for UCGref:
+```{r}
+
+Exp64lo$UCGref <- ((((Exp64lo$Gref - GREF22)*(NISTR))/GREFR) + NIST22)
+Exp64hi$UCGref <- ((((Exp64hi$Gref - GREF22)*(NISTR))/GREFR) + NIST22)
+
+```
+
+Sort data by UCGREF:
+```{r}
+
+#order the data based on ascending NIST values
+Exp64lo_Sorted <- Exp64lo[order(Exp64lo$UCGref), ]
+
+#order the data based on ascending NIST values
+Exp64hi_Sorted <- Exp64hi[order(Exp64hi$UCGref), ]
+
+```
+
+Add Elapsed Time to new data frame:
+```{r}
+Exp64lo_Sorted <- add.time31.6(Exp64lo_Sorted)
+Exp64hi_Sorted <- add.time31.6(Exp64hi_Sorted)
+```
+
+Graphing Sorted data:
+```{r}
+ggplot(Exp64lo_Sorted, aes(x = Time))+
+  geom_point(aes(y = ch0, color = "F8"))+
+  geom_point(aes(y = ch1, color = "F2"))+
+  geom_point(aes(y = ch2, color = "F6"))+
+  geom_point(aes(y = ch3, color = "F7"))+
+  geom_point(aes(y = ch5, color = "F3"))+
+  geom_point(aes(y = ch6, color = "F5"))+
+  geom_point(aes(y = ch7, color = "F4"))+
+#  geom_point(aes(y = GrefC, color = "Ref Pre"))+
+ # geom_point(aes(y = UCGref, color = "Ref Post"))+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Time (s)", 
+       y="Temperature (°C)", 
+       color = "Sensor")+
+  scale_color_manual(name = "Sensor", 
+                     breaks = c('F8', 'F2', 'F6', 'F7', 'F3', 'F5', 'F4', 'Ref Post'), 
+                     values = c('F8' = 'blue', 'F2' = 'green', 'F6' = 'orange', 'F7' = 'pink', 'F3' = 'red', 'F5' = 'aquamarine4', 'F4' = 'purple', 'Ref Post' = 'black'))+
+  ggtitle("Low Temperature EDCR F Series")+
+  theme_classic()
+
+ggplot(Exp64hi_Sorted, aes(x = Time))+
+  geom_point(aes(y = Ch0, color = "F8"))+
+  geom_point(aes(y = Ch1, color = "F2"))+
+  geom_point(aes(y = Ch2, color = "F6"))+
+  geom_point(aes(y = Ch3, color = "F7"))+
+  geom_point(aes(y = Ch5, color = "F3"))+
+  geom_point(aes(y = Ch6, color = "F5"))+
+  geom_point(aes(y = Ch7, color = "F4"))+
+#  geom_point(aes(y = GrefC, color = "Ref Pre"))+
+  #geom_point(aes(y = UCGref, color = "Ref Post"))+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Time (s)", 
+       y="Temperature (°C)", 
+       color = "Sensor")+
+  scale_color_manual(name = "Sensor", 
+                     breaks = c('F8', 'F2', 'F6', 'F7', 'F3', 'F5', 'F4', 'Ref Post'), 
+                     values = c('F8' = 'blue', 'F2' = 'green', 'F6' = 'orange', 'F7' = 'pink', 'F3' = 'red', 'F5' = 'aquamarine4', 'F4' = 'purple', 'Ref Post' = 'black'))+
+  ggtitle("High Temp EDCR F Series")+
+  theme_classic()
+```
+
+Slope and Intercept of the lines created in graphs:
+```{r}
+
+#making the models for the lm lines on above graph
+results <- lm.slope.int(Exp64lo_Sorted, "Time", "ch0")
+slope_ch0 <- results$slope
+intercept_ch0 <- results$intercept
+
+results <- lm.slope.int(Exp64lo_Sorted, "Time", "ch1")
+slope_ch1 <- results$slope
+intercept_ch1 <- results$intercept
+
+results <- lm.slope.int(Exp64lo_Sorted, "Time", "ch2")
+slope_ch2 <- results$slope
+intercept_ch2 <- results$intercept
+
+results <- lm.slope.int(Exp64lo_Sorted, "Time", "ch3")
+slope_ch3 <- results$slope
+intercept_ch3 <- results$intercept
+
+results <- lm.slope.int(Exp64lo_Sorted, "Time", "ch5")
+slope_ch5 <- results$slope
+intercept_ch5 <- results$intercept
+
+results <- lm.slope.int(Exp64lo_Sorted, "Time", "ch6")
+slope_ch6 <- results$slope
+intercept_ch6 <- results$intercept
+
+results <- lm.slope.int(Exp64lo_Sorted, "Time", "ch7")
+slope_ch7 <- results$slope
+intercept_ch7 <- results$intercept
+
+
+
+results <- lm.slope.int(Exp64hi_Sorted, "Time", "Ch0")
+slope_Ch0 <- results$slope
+intercept_Ch0 <- results$intercept
+
+results <- lm.slope.int(Exp64hi_Sorted, "Time", "Ch1")
+slope_Ch1 <- results$slope
+intercept_Ch1 <- results$intercept
+
+results <- lm.slope.int(Exp64hi_Sorted, "Time", "Ch2")
+slope_Ch2 <- results$slope
+intercept_Ch2 <- results$intercept
+
+results <- lm.slope.int(Exp64hi_Sorted, "Time", "Ch3")
+slope_Ch3 <- results$slope
+intercept_Ch3 <- results$intercept
+
+results <- lm.slope.int(Exp64hi_Sorted, "Time", "Ch5")
+slope_Ch5 <- results$slope
+intercept_Ch5 <- results$intercept
+
+results <- lm.slope.int(Exp64hi_Sorted, "Time", "Ch6")
+slope_Ch6 <- results$slope
+intercept_Ch6 <- results$intercept
+
+results <- lm.slope.int(Exp64hi_Sorted, "Time", "Ch7")
+slope_Ch7 <- results$slope
+intercept_Ch7 <- results$intercept
+```
+
+Lines and y=mx+b
+```{r}
+ch022 <- (slope_ch0*20) + intercept_ch0
+#ch035 <- (slope_ch0*24) + intercept_ch0
+
+ch122 <- (slope_ch1*20) + intercept_ch1
+#ch135 <- (slope_ch1*24) + intercept_ch1
+
+ch222 <- (slope_ch2*20) + intercept_ch2
+#ch235 <- (slope_ch2*24) + intercept_ch2
+
+ch322 <- (slope_ch3*20) + intercept_ch3
+#ch335 <- (slope_ch3*24) + intercept_ch3
+
+ch522 <- (slope_ch5*20) + intercept_ch5
+#ch535 <- (slope_ch5*24) + intercept_ch5
+
+ch622 <- (slope_ch6*20) + intercept_ch6
+#ch635 <- (slope_ch6*24) + intercept_ch6
+
+ch722 <- (slope_ch7*20) + intercept_ch7
+#ch735 <- (slope_ch7*24) + intercept_ch7
+
+
+#Ch022 <- (slope_Ch0*31) + intercept_Ch0
+Ch035 <- (slope_Ch0*35) + intercept_Ch0
+
+#Ch122 <- (slope_Ch1*31) + intercept_Ch1
+Ch135 <- (slope_Ch1*35) + intercept_Ch1
+
+#Ch222 <- (slope_Ch2*31) + intercept_Ch2
+Ch235 <- (slope_Ch2*35) + intercept_Ch2
+
+#Ch322 <- (slope_Ch3*31) + intercept_Ch3
+Ch335 <- (slope_Ch3*35) + intercept_Ch3
+
+#Ch522 <- (slope_Ch5*31) + intercept_Ch5
+Ch535 <- (slope_Ch5*35) + intercept_Ch5
+
+#Ch622 <- (slope_Ch6*31) + intercept_Ch6
+Ch635 <- (slope_Ch6*35) + intercept_Ch6
+
+#Ch722 <- (slope_Ch7*31) + intercept_Ch7
+Ch735 <- (slope_Ch7*35) + intercept_Ch7
+
+
+#Ranges
+
+ch0R <- Ch035 - ch022
+ch1R <- Ch135 - ch122
+ch2R <- Ch235 - ch222
+ch3R <- Ch335 - ch322
+ch5R <- Ch535 - ch522
+ch6R <- Ch635 - ch622
+ch7R <- Ch735 - ch722
+
+
+```
+
+
+New data frame of channels and UCGREF: 
+```{r}
+
+channels <- tibble(
+  Temp = c(20, 35),
+  UCGREF = c(UCGREFL, UCGREFH), 
+  Ch0 = c(ch022, Ch035),
+  Ch1 = c(ch122, Ch135), 
+  Ch2 = c(ch222, Ch235), 
+  Ch3 = c(ch322, Ch335), 
+  Ch5 = c(ch522, Ch535), 
+  Ch6 = c(ch622, Ch635), 
+  Ch7 = c(ch722, Ch735),
+)
+
+write.csv(channels, "X and Y of PRE sensor correction.csv", row.names = FALSE)
+```
+
+Graphing corrected channel data:
+```{r}
+ggplot(channels, aes(x = Temp))+
+  geom_point(aes(y = Ch0, color = "F8"))+
+  geom_point(aes(y = Ch1, color = "F2"))+
+  geom_point(aes(y = Ch2, color = "F6"))+
+  geom_point(aes(y = Ch3, color = "F7"))+
+  geom_point(aes(y = Ch5, color = "F3"))+
+  geom_point(aes(y = Ch6, color = "F5"))+
+  geom_point(aes(y = Ch7, color = "F4"))+
+  geom_smooth(aes(y = Ch0), method = "lm", se = FALSE, color = "blue")+
+  geom_smooth(aes(y = Ch1), method = "lm", se = FALSE, color = "green")+
+  geom_smooth(aes(y = Ch2), method = "lm", se = FALSE, color = "orange")+
+  geom_smooth(aes(y = Ch3), method = "lm", se = FALSE, color = "pink")+
+  geom_smooth(aes(y = Ch5), method = "lm", se = FALSE, color = "red")+
+  geom_smooth(aes(y = Ch6), method = "lm", se = FALSE, color = "aquamarine4")+
+  geom_smooth(aes(y = Ch7), method = "lm", se = FALSE, color = "purple")+
+  geom_smooth(aes(y = UCGREF), method = "lm", se = FALSE, color = "black")+
+#  geom_point(aes(y = GrefC, color = "GrefC"))+
+  geom_point(aes(y = UCGREF, color = "Ref Post"))+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Temperature (°C)", 
+       y="Temperature (°C)", 
+       color = "Sensor")+
+  scale_color_manual(name = "Sensor", 
+                     breaks = c('F8', 'F2', 'F6', 'F7', 'F3', 'F5', 'F4', 'Ref Post'), 
+                     values = c('F8' = 'blue', 'F2' = 'green', 'F6' = 'orange', 'F7' = 'pink', 'F3' = 'red', 'F5' = 'aquamarine4', 'F4' = 'purple', 'Ref Post' = 'black'))+
+  ggtitle("Corrected Channels")+
+  theme_classic()
+
+
+Pre_cal_sen <- ggplot(channels, aes(x = Temp))+
+  geom_point(aes(y = Ch0, color = "1"))+
+  geom_point(aes(y = Ch1, color = "2"))+
+  geom_point(aes(y = Ch2, color = "3"))+
+  geom_point(aes(y = Ch3, color = "4"))+
+  geom_point(aes(y = Ch5, color = "5"))+
+  geom_point(aes(y = Ch6, color = "6"))+
+  geom_point(aes(y = Ch7, color = "7"))+
+  geom_smooth(aes(y = Ch0), method = "lm", se = FALSE, color = "blue")+
+  geom_smooth(aes(y = Ch1), method = "lm", se = FALSE, color = "green")+
+  geom_smooth(aes(y = Ch2), method = "lm", se = FALSE, color = "orange")+
+  geom_smooth(aes(y = Ch3), method = "lm", se = FALSE, color = "pink")+
+  geom_smooth(aes(y = Ch5), method = "lm", se = FALSE, color = "red")+
+  geom_smooth(aes(y = Ch6), method = "lm", se = FALSE, color = "aquamarine4")+
+  geom_smooth(aes(y = Ch7), method = "lm", se = FALSE, color = "purple")+
+  geom_smooth(aes(y = UCGREF), method = "lm", se = FALSE, color = "black")+
+  geom_point(aes(y = UCGREF, color = "Reference"))+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Temperature (°C)", 
+       y="Temperature (°C)", 
+       color = "Sensor")+
+  scale_color_manual(name = "Sensor Number", 
+                     breaks = c('Reference', '1', '2', '3', '4', '5', '6', '7'), 
+                     values = c('1' = 'blue', '2' = 'green', '3' = 'orange', '4' = 'pink', '5' = 'red', '6' = 'aquamarine4', '7' = 'purple', 'Reference' = 'black'))+
+  ggtitle("Pre-Calibration")+
+  theme_classic()
+
+Pre_cal_sen
+
+#ggsave("Pre Calibration Sensor.png", Pre_cal_sen, width = 15, height = 10, units = "cm")
+```
+
+Ultimate Channel Formualas THIS IS THE IMPORTANT ONES FOR THE EXPERIMENTAL DATA:
+```{r}
+Correctedch0 <- (((17.90360 - min(Exp64lo$ch0))*((max(Exp64hi$UCGref)- min(Exp64lo$UCGref))))/(max(Exp64hi$Ch0) - min(Exp64lo$ch0))) + min(Exp64lo$UCGref)
+
+CorrectedCh0 <- (((27.05045 - min(Exp64lo$ch0))*((max(Exp64hi$UCGref)- min(Exp64lo$UCGref))))/(max(Exp64hi$Ch0) - min(Exp64lo$ch0))) + min(Exp64lo$UCGref)
+
+Correctedch1 <- (((17.87000 - min(Exp64lo$ch1))*((max(Exp64hi$UCGref)- min(Exp64lo$UCGref))))/(max(Exp64hi$Ch1) - min(Exp64lo$ch1))) + min(Exp64lo$UCGref)
+
+CorrectedCh1 <- (((27.04320 - min(Exp64lo$ch1))*((max(Exp64hi$UCGref)- min(Exp64lo$UCGref))))/(max(Exp64hi$Ch1) - min(Exp64lo$ch1))) + min(Exp64lo$UCGref)
+
+Correctedch2 <- (((18.02625 - min(Exp64lo$ch2))*((max(Exp64hi$UCGref)- min(Exp64lo$UCGref))))/(max(Exp64hi$Ch2) - min(Exp64lo$ch2))) + min(Exp64lo$UCGref)
+
+CorrectedCh2 <- (((27.23430 - min(Exp64lo$ch2))*((max(Exp64hi$UCGref)- min(Exp64lo$UCGref))))/(max(Exp64hi$Ch2) - min(Exp64lo$ch2))) + min(Exp64lo$UCGref)
+
+Correctedch3 <- (((17.92890 - min(Exp64lo$ch3))*((max(Exp64hi$UCGref)- min(Exp64lo$UCGref))))/(max(Exp64hi$Ch3) - min(Exp64lo$ch3))) + min(Exp64lo$UCGref)
+
+CorrectedCh3 <- (((27.04315 - min(Exp64lo$ch3))*((max(Exp64hi$UCGref)- min(Exp64lo$UCGref))))/(max(Exp64hi$Ch3) - min(Exp64lo$ch3))) + min(Exp64lo$UCGref)
+
+Correctedch5 <- (((17.79905 - min(Exp64lo$ch5))*((max(Exp64hi$UCGref)- min(Exp64lo$UCGref))))/(max(Exp64hi$Ch5) - min(Exp64lo$ch5))) + min(Exp64lo$UCGref)
+
+CorrectedCh5 <- (((26.82060 - min(Exp64lo$ch5))*((max(Exp64hi$UCGref)- min(Exp64lo$UCGref))))/(max(Exp64hi$Ch5) - min(Exp64lo$ch5))) + min(Exp64lo$UCGref)
+
+Correctedch6 <- (((17.86050 - min(Exp64lo$ch6))*((max(Exp64hi$UCGref)- min(Exp64lo$UCGref))))/(max(Exp64hi$Ch6) - min(Exp64lo$ch6))) + min(Exp64lo$UCGref)
+
+CorrectedCh6 <- (((27.25580 - min(Exp64lo$ch6))*((max(Exp64hi$UCGref)- min(Exp64lo$UCGref))))/(max(Exp64hi$Ch6) - min(Exp64lo$ch6))) + min(Exp64lo$UCGref)
+
+Correctedch7 <- (((17.81760 - min(Exp64lo$ch7))*((max(Exp64hi$UCGref)- min(Exp64lo$UCGref))))/(max(Exp64hi$Ch7) - min(Exp64lo$ch7))) + min(Exp64lo$UCGref)
+
+CorrectedCh7 <- (((27.21245 - min(Exp64lo$ch7))*((max(Exp64hi$UCGref)- min(Exp64lo$UCGref))))/(max(Exp64hi$Ch7) - min(Exp64lo$ch7))) + min(Exp64lo$UCGref)
+
+UCGREFlo <- (((18.08115 - GREF22)*(NISTR))/GREFR) + NIST22
+UCGREFhi <- (((27.17370 - GREF22)*(NISTR))/GREFR) + NIST22
+```
+
+Values into table:
+```{r}
+
+corrected <- tibble(
+  Temp = c(20, 35),
+  UCGREF = c(UCGREFlo, UCGREFhi), 
+  Ch0 = c(Correctedch0, CorrectedCh0),
+  Ch1 = c(Correctedch1, CorrectedCh1), 
+  Ch2 = c(Correctedch2, CorrectedCh2), 
+  Ch3 = c(Correctedch3, CorrectedCh3), 
+  Ch5 = c(Correctedch5, CorrectedCh5), 
+  Ch6 = c(Correctedch6, CorrectedCh6), 
+  Ch7 = c(Correctedch7, CorrectedCh7),
+)
+
+#write.csv(corrected, "X and Y of post sensor correction.csv", row.names = FALSE)
+```
+
+```{r}
+Post_cal_sen <- ggplot(corrected, aes(x = Temp))+
+  geom_point(aes(y = Ch0, color = "1"))+
+  geom_point(aes(y = Ch1, color = "2"))+
+  geom_point(aes(y = Ch2, color = "3"))+
+  geom_point(aes(y = Ch3, color = "4"))+
+  geom_point(aes(y = Ch5, color = "5"))+
+  geom_point(aes(y = Ch6, color = "6"))+
+  geom_point(aes(y = Ch7, color = "7"))+
+  geom_smooth(aes(y = Ch0), method = "lm", se = FALSE, color = "blue")+
+  geom_smooth(aes(y = Ch1), method = "lm", se = FALSE, color = "green")+
+  geom_smooth(aes(y = Ch2), method = "lm", se = FALSE, color = "orange")+
+  geom_smooth(aes(y = Ch3), method = "lm", se = FALSE, color = "pink")+
+  geom_smooth(aes(y = Ch5), method = "lm", se = FALSE, color = "red")+
+  geom_smooth(aes(y = Ch6), method = "lm", se = FALSE, color = "aquamarine4")+
+  geom_smooth(aes(y = Ch7), method = "lm", se = FALSE, color = "purple")+
+  geom_smooth(aes(y = UCGREF), method = "lm", se = FALSE, color = "black")+
+#  geom_point(aes(y = GrefC, color = "GrefC"))+
+  geom_point(aes(y = UCGREF, color = "Reference"))+
+  scale_x_continuous(breaks = scales::pretty_breaks(n=10))+
+  labs(x="Temperature (°C)", 
+       y="Temperature (°C)", 
+       color = "Sensor")+
+  scale_color_manual(name = "Sensor Number", 
+                     breaks = c('Reference', '1', '2', '3', '4', '5', '6', '7'), 
+                     values = c('1' = 'blue', '2' = 'green', '3' = 'orange', '4' = 'pink', '5' = 'red', '6' = 'aquamarine4', '7' = 'purple', 'Reference' = 'black'))+
+  ggtitle("Post-Calibration")+
+  theme_classic()
+
+Post_cal_sen
+
+#ggsave("Post Calibration Sensor.png", Post_cal_sen, width = 15, height = 10, units = "cm")
+```
+Lines for sensors post calibration:
+```{r}
+results <- lm.slope.int(corrected, "Temp", "Ch0")
+slope_Ch0C <- results$slope
+intercept_Ch0C <- results$intercept
+
+results <- lm.slope.int(corrected, "Temp", "Ch1")
+slope_Ch1C <- results$slope
+intercept_Ch1C <- results$intercept
+
+results <- lm.slope.int(corrected, "Temp", "Ch2")
+slope_Ch2C <- results$slope
+intercept_Ch2C <- results$intercept
+
+results <- lm.slope.int(corrected, "Temp", "Ch3")
+slope_Ch3C <- results$slope
+intercept_Ch3C <- results$intercept
+
+results <- lm.slope.int(corrected, "Temp", "Ch5")
+slope_Ch5C <- results$slope
+intercept_Ch5C <- results$intercept
+
+results <- lm.slope.int(corrected, "Temp", "Ch6")
+slope_Ch6C <- results$slope
+intercept_Ch6C <- results$intercept
+
+results <- lm.slope.int(corrected, "Temp", "Ch7")
+slope_Ch7C <- results$slope
+intercept_Ch7C <- results$intercept
+
+results <- lm.slope.int(corrected, "Temp", "UCGREF")
+slope_UCGREFC <- results$slope
+intercept_UCGREFC <- results$intercept
+```
+
+Making new dataframe with Post-Calibration equation values:
+```{r}
+Post_cal_equations <- tibble(
+  Sensor = c(1, 2, 3, 4, 5, 6, 7, "Reference"),
+  Slope = c(slope_Ch0C, slope_Ch1C, slope_Ch2C, slope_Ch3C, slope_Ch5C, slope_Ch6C, slope_Ch7C, slope_UCGREFC), 
+  Intercept = c(intercept_Ch0C, intercept_Ch1C, intercept_Ch2C, intercept_Ch3C, intercept_Ch5C, intercept_Ch7C, intercept_Ch7C, intercept_UCGREFC)
+)
+
+#write.csv(Post_cal_equations, "slopes and intercepts of post-calibration lines", row.names = FALSE)
+```
+
+
